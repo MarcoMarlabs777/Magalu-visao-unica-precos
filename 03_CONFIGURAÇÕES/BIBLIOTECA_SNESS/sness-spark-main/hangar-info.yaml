@@ -1,0 +1,26 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: sness-lib-spark
+  description: "sness-lib-spark - Framework de abstracao do Spark para a plataforma de dados (subpackage spark), distribuido como biblioteca Python."
+  annotations:
+    security/business-risk: "Low"
+    security/public: "Internal"
+    security/accessibility: "No"
+    security/waf: "No"
+    security/qradar: "No"
+    security/authentication: "Not apply"
+    security/administration: "Not apply"
+    gitlab.com/project-slug: "luizalabs/magacloud-data/sness-packages/sness-spark"
+    argocd/app-name: "TODO"
+    project/service.tier: OTHERS
+  tags:
+    - "python"
+    - "pyspark"
+    - "cicd"
+    - "tribe-dados"
+    - "squad-dataops"
+spec:
+  type: library
+  lifecycle: production
+  owner: group:67a5fd0007e357c453a74efd

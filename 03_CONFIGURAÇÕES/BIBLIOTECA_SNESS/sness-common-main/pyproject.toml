@@ -1,0 +1,97 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sness-lib-common"
+version = "1.10.0"
+description = "Luizalabs datalake lib common"
+readme = "README.md"
+requires-python = ">=3.8.10"
+maintainers = [
+    {name = "squad-data-ops", email = "squad-dataops@luizalabs.com"},
+]
+dependencies = [
+    "google-cloud-storage~=2.11.0",
+    "pyarrow~=11.0.0",
+    "boto3~=1.24.30",
+    "google-cloud-secret-manager~=2.20.1",
+]
+classifiers = [
+    'Intended Audience :: Developers',
+    'Operating System :: OS Independent',
+    'Programming Language :: Python :: 3.8',
+    'Programming Language :: Python :: 3.9',
+    'Programming Language :: Python :: 3.10',
+    'Programming Language :: Python :: 3.11',
+]
+
+[project.optional-dependencies]
+dev = [
+    'bumpversion~=0.5.3',
+    'flake8~=3.7.8',
+    'ipython~=7.8.0',
+    'pytest-cov~=2.7.1',
+    'pytest~=6.2.5',
+    'towncrier~=21.3.0',
+    'vcrpy~=2.1.0',
+    'yattag~=1.12.2',
+    'pre-commit~=3.5.0'
+]
+
+[tool.towncrier]
+package = 'sness'
+directory = 'changelog.d'
+filename = 'CHANGELOG.md'
+title_format = '{version} ({project_date})'
+template = 'towncrier_template.rst'
+
+[tool.flake8]
+exclude = "*migration*"
+extend-ignore = """
+    W503,
+    W504,
+    E731,
+"""
+
+[tool.pytest]
+looponfailroots = "sness/"
+python_files = "test*.py"
+python_paths = "sness/"
+
+[tool.coverage.run]
+branch = true
+omit = [
+    "setup.py",
+    "*/__init__.py",
+    "*/settings/*.py",
+    "*/tests/*",
+]
+
+[tool.black]
+line-length = 79
+skip-string-normalization = true
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+
+[tool.isort]
+profile = "black"
+line_length = 79
+lines_after_imports = 2
+skip_gitignore = true
+
+[tool.docformatter]
+recursive = true
+make-summary-multi-line = true
+pre-summary-newline = true
+wrap-summaries = 79
+wrap-descriptions = 79
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sness", "sness.*"]
+exclude = [
+    "sness.tests",
+    "sness.tests.*"
+]

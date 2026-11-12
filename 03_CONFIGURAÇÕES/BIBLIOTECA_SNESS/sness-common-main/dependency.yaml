@@ -1,0 +1,18 @@
+owner: "Data Platform Engineering"
+tribe: "Data Engineering"
+vertical: "Data Intelligence"
+application:
+  description: "Framework de abstracao do spark para a plataforma de dados"
+  name: "data-plataform"
+  languages: "Python"
+  fortify_id: "sness-commom"
+security:
+  url_homolog: "https://127.0.0.1"
+  url_prod: "https://127.0.0.1"
+  businessRisk: "Medium"
+  public: "Internal"
+  accessibility: "No"
+  waf: "No"
+  qradar: "No"
+  authentication: "Not apply"
+  administration: "Not apply"

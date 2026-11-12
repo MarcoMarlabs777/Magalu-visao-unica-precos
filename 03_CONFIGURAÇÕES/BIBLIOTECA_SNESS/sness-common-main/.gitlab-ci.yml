@@ -1,0 +1,145 @@
+stages:
+  - Lint
+  - Precommit
+  - Tests
+  - Fortify
+  - Release
+  - Deploy
+
+image: python:3.8
+
+create:
+  stage: Release
+  image: $CIKNIFE_IMAGE
+  script:
+    - ci-knife create-release --no-prefix --without-npm
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+unit_tests:
+  stage: Tests
+  before_script:
+    - pip install -e .[dev]
+  script: make coverage
+  coverage: '/^TOTAL\s+\d+\s+\d+\s+(\d+\%)$/'
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_COMMIT_BRANCH == "main"'
+
+precommit:
+  stage: Precommit
+  before_script:
+    - apt update && apt install -y --no-install-recommends git
+    - pip install -e .[dev]
+    - rm -rf ~/.cache/pre-commit
+  script:
+    - pre-commit run --all-files
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == "main"'
+
+deploy_sness:
+  stage: Deploy
+  image:
+    name: gcr.io/magalu-cicd/tribe-dados/squad-data-ops/image-ci-mgc-line:v1.0.0
+    entrypoint: [""]
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+  script:
+    - rclone copy sness/ container:$SNESS_BUCKET/sness/ --exclude "settings/__init__.py" --s3-no-check-bucket
+
+
+.base_gcloud:
+  image: ubuntu:22.04
+  variables:
+    GOOGLE_APPLICATION_CREDENTIALS: /etc/secrets/gcloud/creds/serviceaccount.json
+    GCLOUD_PROJECT_NAME: "maga-bigdata"
+    CLOUDSDK_PYTHON: /usr/bin/python3
+  before_script:
+    - apt update && apt install -y wget ca-certificates openssl python3 python3-pip jq
+    - update-ca-certificates
+    - if [ -z ${GCP_SA_KEY+x} ]; then echo "GCP_SA_KEY not set on CI variables!"; exit 1; fi
+    - mkdir -pv /etc/secrets/gcloud/creds
+    - echo $GCP_SA_KEY | base64 -d > /etc/secrets/gcloud/creds/serviceaccount.json
+
+    # Download and install Google Cloud SDK
+    - wget https://dl.google.com/dl/cloudsdk/release/google-cloud-sdk.tar.gz
+    - tar zxf google-cloud-sdk.tar.gz -C /opt && /opt/google-cloud-sdk/install.sh --usage-reporting=false --path-update=true
+    - PATH="/opt/google-cloud-sdk/bin:${PATH}"
+    - gcloud --quiet components update
+    - gcloud auth activate-service-account --key-file ${GOOGLE_APPLICATION_CREDENTIALS}
+    - gcloud config set project $GCLOUD_PROJECT_NAME
+
+#########################################################################################################
+# Update image tag on joystick-prd
+#########################################################################################################
+.update_sness_joystick_prd:
+  extends: .base_gcloud
+  stage: Deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+  variables:
+    COMPOSER_NAME: joystick-prd
+  script:
+    - if [ -z ${COMPOSER_NAME+x} ]; then echo "COMPOSER_NAME not set or empty!"; exit 1; fi
+    # Get Bucket from joystick-prd
+    - DAGS_PREFIX=$(gcloud composer environments describe $COMPOSER_NAME --project maga-bigdata --format json --location us-east1 | jq -r .config.dagGcsPrefix)
+    - BUCKET_NAME=$(echo $DAGS_PREFIX | sed 's/gs:\/\/\(.*\)\/.*/\1/')
+    - echo $DAGS_PREFIX; echo $BUCKET_NAME
+    - gsutil -m -o "GSUtil:exclude_regex=settings/__init__.py" -o "GSUtil:delete_extra_files=False" copy -r sness/* $DAGS_PREFIX/sness/
+
+update_joystick_prd:
+  extends: .update_sness_joystick_prd
+  when: manual
+  variables:
+    COMPOSER_NAME: joystick-prd
+
+commitlint:
+  image: $CIKNIFE_IMAGE
+  stage: Lint
+  only: [ merge_requests ]
+  script:
+    - ci-knife commitlint
+
+security-gate:
+  stage: Fortify
+  image: $CIKNIFE_IMAGE
+  script:
+    - ci-knife security-scanner
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+deploy_to_joystick_composers_bu:
+  extends: .base_gcloud
+  stage: Deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+  script:
+    - DAG_PREFIXES=$(gcloud composer environments list --project $GCLOUD_PROJECT_NAME --locations us-east1 --format="json" | jq -r '.[] | select(.name | contains("joystick")) | .config.dagGcsPrefix')
+
+    - if [ -z "$DAG_PREFIXES" ]; then echo "Nenhum Composer com 'joystick' no nome foi encontrado!"; exit 1; fi
+    - if [ -f "sness/settings/__init__.py" ]; then rm -f sness/settings/__init__.py; fi
+    - |
+      for DAGS_PREFIX in $DAG_PREFIXES; do
+        echo "Deploying para o Composer Joystick: $DAGS_PREFIX"
+        gcloud storage cp -r "sness/*" "$DAGS_PREFIX/sness/" --ignore-symlinks
+      done
+    - echo "Deploy concluído com sucesso em todos os Composers de BU Joystick!"
+
+deploy_pypi:
+  stage: Deploy
+  tags:
+    - global-docker-tls
+  variables:
+    TWINE_USERNAME: "${USER_PYPI}"
+    TWINE_PASSWORD: "${PASSWORD_PYPI}"
+  before_script:
+    - pip install --upgrade pip
+    - pip install build twine
+    - pip install -e .[dev]
+  script:
+    - make test
+    - make deploy
+  only:
+    - tags
