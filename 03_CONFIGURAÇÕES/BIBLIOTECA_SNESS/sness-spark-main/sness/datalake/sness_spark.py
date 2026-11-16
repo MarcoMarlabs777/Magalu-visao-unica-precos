@@ -146,54 +146,35 @@ class _SnessSparkBase:
         version_offset=0,
         write_needed=False,
     ):
-        # CONFIGURAÇÃO CLOUD
-        #ds = DatasetMetadata(namespace, dataset)
-        #return ds.build_lake_path(
-        #    environment,
-        #    zone,
-        #    mode=mode,
-        #    version=version,
-        #    version_offset=version_offset,
-        #    write_needed=write_needed,
-        #    cloud_environment=cloud_environment,
-        #)
-        # ==========================================
-        # IMPLEMENTAÇÃO VOLUMES DATABRICKS
-        # ==========================================
+        """Resolve caminhos: leitura somente na origem; escrita somente em resultados.
+
+        Mantem o comportamento original SNESS fora do modo Databricks.
         """
-        Resolve caminhos dos datasets no Databricks Volumes.
-        Preserva a assinatura original do Sness.
-        """
-        import os
         if os.environ.get("SNESS_DATABRICKS_SERVERLESS") == "true":
-
-            base = (
-                "/Volumes/demo-catalog/visao_unica_precos"
-            )
-
+            base = "/Volumes/test/default/dados_origin_visao_unica"
 
             if not isinstance(dataset, str) or not dataset:
-                raise ValueError("Nome de dataset inválido")
-
+                raise ValueError("Nome de dataset invalido")
             if "/" in dataset or "\\" in dataset or dataset in (".", ".."):
-                raise ValueError(f"Nome de dataset não permitido: {dataset}")
+                raise ValueError(f"Nome de dataset nao permitido: {dataset}")
 
-            caminho_entrada = f"{base}/dados_origin_visao_unica/parquet/{dataset}"
-            caminho_saida = f"{base}/resultados/{dataset}"
-
-            # GRAVAÇÃO: nunca modifica os datasets originais utiliza exclusivamente resultados/
             if write_needed:
-                return caminho_saida
+                return f"{base}/resultados/{dataset}"
+            return f"{base}/parquet_volumetria_final/{dataset}"
 
-            # LEITURA: priorizar o resultado já gerado
-            if os.path.isdir(caminho_saida):
-                return caminho_saida
+        ds = DatasetMetadata(namespace, dataset)
+        return ds.build_lake_path(
+            environment,
+            zone,
+            mode=mode,
+            version=version,
+            version_offset=version_offset,
+            write_needed=write_needed,
+            cloud_environment=cloud_environment,
+        )
 
-            # Caso contrário, utilizar o dataset original
-            return caminho_entrada
-        
     # ==========================================
-    # IMPLEMENTAÇÃO ORIGINAL MAGALU / GCP
+    # IMPLEMENTACAO ORIGINAL MAGALU / GCP
     # ==========================================
     @staticmethod
     def resolve_path(func):
@@ -822,42 +803,35 @@ class _SnessDataFrameReader(_SnessSparkBase):
         # LEITURA ADAPTADA PARA DATABRICKS
         # ==========================================
         if os.environ.get("SNESS_DATABRICKS_SERVERLESS") == "true":
-
-            base_entrada = (
-                "/Volumes/demo-catalog/visao_unica_precos/"
-                "dados_origin_visao_unica/parquet_volumetria_final"
+            # Leitura EXCLUSIVA da origem, mesmo quando ha arquivos
+            # com o mesmo nome no diretorio de resultados.
+            caminho = self._get_path(
+                environment=environment,
+                zone=zone,
+                namespace=namespace,
+                dataset=dataset,
+                cloud_environment=cloud_environment,
+                version=version,
+                version_offset=version_offset,
+                write_needed=False,
             )
 
-            if (
-                not isinstance(dataset, str)
-                or not dataset
-                or dataset in (".", "..")
-                or "/" in dataset
-                or "\\" in dataset
-            ):
-                raise ValueError("Nome de dataset invalido")
+            if version is not None or int(version_offset) != 0:
+                raise ValueError("Leitura versionada nao suportada no Serverless")
 
-            caminho = f"{base_entrada}/{dataset}"
+            if not os.path.isdir(caminho):
+                raise FileNotFoundError(
+                    f"Dataset '{dataset}' nao encontrado. "
+                    f"Caminho de entrada: {caminho}"
+                )
 
             opcoes_spark = dict(options)
             formato = opcoes_spark.pop("format", "parquet")
-
             if formato != "parquet":
-                raise ValueError(
-                    "Esta adaptacao suporta apenas Parquet"
-                )
+                raise ValueError("Esta adaptacao suporta apenas Parquet")
 
-            if version is not None or int(version_offset) != 0:
-                raise ValueError(
-                    "Leitura versionada nao suportada"
-                )
-
-            return (
-                self._reader
-                .format(formato)
-                .options(**opcoes_spark)
-                .load(caminho)
-            )
+            print(f"[SNESS READ REAL] dataset={dataset} | path={caminho}", flush=True)
+            return self._reader.format(formato).options(**opcoes_spark).load(caminho)
 
         # ==========================================
         # LEITURA ORIGINAL SNESS
@@ -1355,7 +1329,8 @@ class _SnessDataFrameWriter(_SnessSparkBase):
         if os.environ.get("SNESS_DATABRICKS_SERVERLESS") == "true":
 
             base_saida = (
-                "/Volumes/demo-catalog/visao_unica_precos/resultados"
+                "/Volumes/test/default/"
+                "dados_origin_visao_unica/resultados"
             )
 
             if not isinstance(dataset, str) or not dataset:
@@ -1371,6 +1346,7 @@ class _SnessDataFrameWriter(_SnessSparkBase):
                 )
 
             caminho = f"{base_saida}/{dataset}"
+            print(f"[SNESS WRITE REAL] dataset={dataset} | path={caminho}", flush=True)
 
             # Opções específicas da biblioteca Sness
             # que não pertencem ao DataFrameWriter Spark.

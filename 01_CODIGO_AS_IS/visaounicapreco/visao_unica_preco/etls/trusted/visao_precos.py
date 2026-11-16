@@ -284,13 +284,13 @@ def config_spark_parallism(ss: SnessSpark) -> None:
     The configs in this functions disable the AQE to avoid this.
     """
     # desativando o Adaptative query execution
-    ss.spark.conf.set("spark.sql.adaptive.enabled", "false")
-    ss.spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "false")
-    ss.spark.conf.set("spark.sql.shuffle.partitions", 800)
-    ss.spark.conf.set("spark.default.parallelism", 800)
-    ss.spark.conf.set(
-        "spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes", "2MB"
-    )
+    #ss.spark.conf.set("spark.sql.adaptive.enabled", "false")
+    #ss.spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "false")
+    #ss.spark.conf.set("spark.sql.shuffle.partitions", 800)
+    #ss.spark.conf.set("spark.default.parallelism", 800)
+    #ss.spark.conf.set(
+    #    "spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes", "2MB"
+    #)
 
 
 def save_penultimate_execution(

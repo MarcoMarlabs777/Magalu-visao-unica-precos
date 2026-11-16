@@ -50,18 +50,23 @@ for pacote in pacotes:
 
 # COMMAND ----------
 
-# Identificando o caminho do sness common main
+# IDENTIFICA O PATH do sness spark main e sness common main
+
 current_user = spark.sql("SELECT current_user()").collect()[0][0]
 
-lib_path = f"/Workspace/Users/{current_user}/PROJETO_VISAO_UNICA_PRECOS/03_CONFIGURAÇÕES/BIBLIOTECA_SNESS/sness-common-main"
+base_path = f"/Workspace/Users/{current_user}/Magalu-visao-unica-precos/03_CONFIGURAÇÕES/BIBLIOTECA_SNESS"
 
-print(lib_path)
+sness_spark_path = f"{base_path}/sness-spark-main"
+sness_common_path = f"{base_path}/sness-common-main"
+
+print("Sness Spark:", sness_spark_path)
+print("Sness Common:", sness_common_path)
 
 
 # COMMAND ----------
 
 # Instalar sness-lib-common-1.0.0 sem dependencias
-%pip install --no-deps "{lib_path}"
+%pip install --no-deps "{sness_common_path}"
 
 # COMMAND ----------
 
@@ -77,18 +82,23 @@ print("Sness Common:", md.version("sness-lib-common"))
 
 # COMMAND ----------
 
-# IDENTIFICA O PATH do sness spark main
+# IDENTIFICA O PATH do sness spark main e sness common main
+
 current_user = spark.sql("SELECT current_user()").collect()[0][0]
 
-lib_path = f"/Workspace/Users/{current_user}/PROJETO_VISAO_UNICA_PRECOS/03_CONFIGURAÇÕES/BIBLIOTECA_SNESS/sness-spark-main"
+base_path = f"/Workspace/Users/{current_user}/Magalu-visao-unica-precos/03_CONFIGURAÇÕES/BIBLIOTECA_SNESS"
 
-print(lib_path)
+sness_spark_path = f"{base_path}/sness-spark-main"
+sness_common_path = f"{base_path}/sness-common-main"
+
+print("Sness Spark:", sness_spark_path)
+print("Sness Common:", sness_common_path)
 
 # COMMAND ----------
 
 # DBTITLE 1,Instalar Sness Spark
 # Instala Sness Spark 1.10.0
-%pip install --no-deps "{lib_path}"
+%pip install --no-deps "{sness_spark_path}"
 
 # COMMAND ----------
 
@@ -97,11 +107,22 @@ print(lib_path)
 
 # COMMAND ----------
 
+# IDENTIFICA O PATH do sness spark main e sness common main
+
+current_user = spark.sql("SELECT current_user()").collect()[0][0]
+
+base_path = f"/Workspace/Users/{current_user}/Magalu-visao-unica-precos/03_CONFIGURAÇÕES/BIBLIOTECA_SNESS"
+
+sness_spark_path = f"{base_path}/sness-spark-main"
+sness_common_path = f"{base_path}/sness-common-main"
+
+print("Sness Spark:", sness_spark_path)
+print("Sness Common:", sness_common_path)
+
+# COMMAND ----------
+
 # Verifica versão da instalação Sness Common e Sness Spark
 import importlib.metadata as md
-import importlib.util
-import sys
-import os
 from pathlib import Path
 
 try:
@@ -110,394 +131,393 @@ except ImportError:
     tomllib = None
 
 PACOTES = {
-    "Sness Common": ("sness-lib-common", "metadata.py"),
-    "Sness Spark": ("sness-lib-spark", "sness_spark.py")
+    "Sness Common": ("sness-lib-common", sness_common_path),
+    "Sness Spark": ("sness-lib-spark", sness_spark_path)
 }
 
-def obter_versao(pacote, arquivo):
+def obter_versao(pacote, caminho):
     try:
         return md.version(pacote)
     except md.PackageNotFoundError:
         pass
 
-    if tomllib is None:
+    projeto = Path(caminho) / "pyproject.toml"
+
+    if not projeto.is_file() or tomllib is None:
         return "Versão não identificada"
 
-    raizes = [Path(p) for p in sys.path if p]
-    raizes += [Path.cwd(), Path("/Workspace")]
+    try:
+        with projeto.open("rb") as f:
+            dados = tomllib.load(f)
 
-    visitados = set()
+        info = dados.get("project", {})
+        if not info.get("version"):
+            info = dados.get("tool", {}).get("poetry", {})
 
-    for raiz in raizes:
-        if not raiz.is_dir():
-            continue
+        return info.get("version") or "Versão não identificada"
 
-        for atual, pastas, arquivos in os.walk(raiz):
-            caminho = Path(atual)
-
-            if str(caminho) in visitados:
-                pastas[:] = []
-                continue
-
-            visitados.add(str(caminho))
-
-            profundidade = len(caminho.parts) - len(raiz.parts)
-            if profundidade > 8:
-                pastas[:] = []
-                continue
-
-            pastas[:] = [
-                p for p in pastas
-                if p not in {".git", ".venv", "__pycache__", "node_modules"}
-            ]
-
-            if (
-                caminho.name != "datalake"
-                or caminho.parent.name != "sness"
-                or arquivo not in arquivos
-            ):
-                continue
-
-            for pasta in caminho.parents:
-                projeto = pasta / "pyproject.toml"
-
-                if projeto.is_file():
-                    try:
-                        with projeto.open("rb") as f:
-                            dados = tomllib.load(f)
-
-                        info = dados.get("project", {})
-                        if not info.get("name"):
-                            info = dados.get("tool", {}).get("poetry", {})
-
-                        nome = str(info.get("name", "")).lower().replace("_", "-")
-
-                        if nome == pacote:
-                            return info.get("version", "Versão não declarada")
-                    except Exception:
-                        pass
-
-                if pasta == raiz or pasta == Path("/"):
-                    break
-
-    return "Versão não identificada"
+    except Exception:
+        return "Versão não identificada"
 
 
-for nome, (pacote, arquivo) in PACOTES.items():
-    print(f"{nome}: {obter_versao(pacote, arquivo)}")
+for nome, (pacote, caminho) in PACOTES.items():
+    print(f"{nome}: {obter_versao(pacote, caminho)}")
 
 # COMMAND ----------
 
 # PACOTE SECRET MANAGER GCP NÃO INSTALADO
-# REMOÇÃO DA NECESSIDADE NO ARQUIVO settings.py e secret.py
+# REMOÇÃO DA NECESSIDADE do  SECRET MANAGER GCP NO ARQUIVO monitoring.py e secret.py
 #%pip install "google-cloud-secret-manager~=2.20.1"
+#/Workspace/Users/marco.vieira@marlabs.com/Magalu-visao-unica-precos/03_CONFIGURAÇÕES/BIBLIOTECA_SNESS/sness-common-main/sness/settings/secret.py
+#/Workspace/Users/marco.vieira@marlabs.com/Magalu-visao-unica-precos/03_CONFIGURAÇÕES/BIBLIOTECA_SNESS/sness-spark-main/sness/datalake/monitoring.py
 
 # COMMAND ----------
 
-
-# Localiza os modulos SNESS no ambiente Python
-# VALIDACAO SNESS - MULTIPLOS AMBIENTES DATABRICKS
+#CARREGAR BIBLIOTECAS SNESS, INICIALIZAR E IDENTIFICAR VERSOES
 # ============================================================
-#
-# Nao instala pacotes.
-# Nao altera arquivos.
-# Nao acessa GCP.
-# Atualiza sys.path apenas na sessao atual.
+
+import os
+import sys
+import importlib
+import importlib.util
+import importlib.metadata as md
+import tomllib
+from pathlib import Path
+
+# ============================================================
+# 1. IDENTIFICAR USUARIO E DIRETORIOS
+# ============================================================
+
+# IDENTIFICA O PATH do sness spark main e sness common main
+
+current_user = spark.sql("SELECT current_user()").collect()[0][0]
+
+base_path = f"/Workspace/Users/{current_user}/Magalu-visao-unica-precos/03_CONFIGURAÇÕES/BIBLIOTECA_SNESS"
+
+sness_spark_path = f"{base_path}/sness-spark-main"
+sness_common_path = f"{base_path}/sness-common-main"
+
+current_user = spark.sql(
+    "SELECT current_user()"
+).first()[0]
+
+# Variaveis criadas anteriormente
+COMMON_ROOT = Path(sness_common_path)
+SPARK_ROOT = Path(sness_spark_path)
+
+# Diretorios internos dos pacotes Python
+COMMON = COMMON_ROOT / "sness"
+SPARK = SPARK_ROOT / "sness"
+
+COMMON_DATALAKE = COMMON / "datalake"
+SPARK_DATALAKE = SPARK / "datalake"
+
+COMMON_STORAGE = COMMON / "storage"
+SPARK_SETTINGS = SPARK / "settings"
+SPARK_ETL = SPARK / "etl"
+
+# ============================================================
+# 2. VALIDAR DIRETORIOS
+# ============================================================
+
+obrigatorios = {
+    "SNESS Common": COMMON,
+    "SNESS Spark": SPARK,
+    "Common metadata.py": COMMON_DATALAKE / "metadata.py",
+    "Common storage": COMMON_STORAGE,
+    "Spark sness_spark.py": SPARK_DATALAKE / "sness_spark.py",
+    "Spark settings": SPARK_SETTINGS
+}
+
+for nome, caminho in obrigatorios.items():
+    if not caminho.exists():
+        raise FileNotFoundError(
+            f"{nome} nao encontrado: {caminho}"
+        )
+
+    print(f"[OK] {nome}")
+
+# ============================================================
+# 3. CONFIGURAR AMBIENTE
+# ============================================================
+
+# Habilitar somente se as adaptacoes da SNESS para
+# Serverless estiverem sendo utilizadas neste Compute.
+# Esta flag nao altera o tipo real do Compute.
+os.environ["SNESS_DATABRICKS_SERVERLESS"] = "true"
+
+# ============================================================
+# 4. CONFIGURAR NAMESPACE SNESS
+# ============================================================
+
+# Mantem o pacote instalado e adiciona as origens locais.
+# Evita substituir o modulo sness em sys.modules.
+
+import sness
+
+for caminho in [COMMON, SPARK]:
+    caminho_str = str(caminho)
+
+    if caminho_str not in sness.__path__:
+        sness.__path__.append(caminho_str)
+
+# ============================================================
+# 5. CONFIGURAR DATALAKE
+# ============================================================
+
+import sness.datalake
+
+for caminho in [COMMON_DATALAKE, SPARK_DATALAKE]:
+    caminho_str = str(caminho)
+
+    if caminho_str not in sness.datalake.__path__:
+        sness.datalake.__path__.append(caminho_str)
+
+# ============================================================
+# 6. CONFIGURAR ETL
 # ============================================================
 
 import sys
-import os
-import site
 import importlib
-import importlib.util
+from pathlib import Path
+
+etl_path = Path(sness_spark_path) / "sness" / "etl"
+
+if not etl_path.is_dir():
+    raise FileNotFoundError(
+        f"Diretorio SNESS ETL nao encontrado: {etl_path}"
+    )
+
+# Verifica se o modulo ja foi carregado
+if "sness.etl" in sys.modules:
+    etl = sys.modules["sness.etl"]
+else:
+    etl = importlib.import_module("sness.etl")
+
+# Adiciona o caminho correto
+if str(etl_path) not in etl.__path__:
+    etl.__path__.append(str(etl_path))
+
+print("[OK] SNESS ETL")
+print("Caminho configurado:", etl_path)
+print("Caminhos ativos:", list(etl.__path__))
+print("Origem do modulo:", getattr(etl, "__file__", None))
+
+# ============================================================
+# 7. CONFIGURAR SETTINGS
+# ============================================================
+
+import importlib
+from pathlib import Path
+
+COMMON_SETTINGS = Path(sness_common_path) / "sness" / "settings"
+SPARK_SETTINGS = Path(sness_spark_path) / "sness" / "settings"
+
+# Valida a existência dos arquivos
+cloud_config_file = COMMON_SETTINGS / "cloud_config.py"
+
+if not cloud_config_file.is_file():
+    raise FileNotFoundError(
+        f"cloud_config.py não encontrado: {cloud_config_file}"
+    )
+
+# Carrega o pacote settings existente
+import sness.settings
+
+# Adiciona os diretórios das duas bibliotecas
+for caminho in [COMMON_SETTINGS, SPARK_SETTINGS]:
+    if caminho.is_dir():
+        caminho_str = str(caminho)
+
+        if caminho_str not in sness.settings.__path__:
+            sness.settings.__path__.append(caminho_str)
+
+importlib.invalidate_caches()
+
+# Valida o módulo real da SNESS Common
+from sness.settings import cloud_config
+
+print("[OK] SNESS Settings")
+print("cloud_config:", cloud_config.__file__)
+print(
+    "CLOUD_ENVIRONMENT:",
+    getattr(cloud_config, "CLOUD_ENVIRONMENT", "Não definido")
+)
+
+# ============================================================
+# 8. IMPORTAR COMPONENTES SNESS
+# ============================================================
+
+# Verifica primeiro a disponibilidade dos modulos
+modulos = [
+    "sness.datalake.metadata",
+    "sness.storage",
+    "sness.datalake.sness_spark"
+]
+
+print("\n===== MODULOS SNESS =====")
+
+for nome in modulos:
+    spec = importlib.util.find_spec(nome)
+
+    if spec is None:
+        raise ModuleNotFoundError(
+            f"Modulo nao encontrado: {nome}"
+        )
+
+    print(f"[OK] {nome}")
+    print(f"     {spec.origin}")
+
+# Imports reais: podem revelar dependencias adicionais
+from sness.datalake.metadata import Environment, Zone
+from sness.datalake.sness_spark import SnessSpark
+
+print("\n[OK] Environment e Zone")
+print("[OK] SnessSpark")
+
+# ============================================================
+# 9. INICIALIZAR SNESS SPARK
+# ============================================================
+
+print("\nInicializando SNESS Spark...")
+
+ss = SnessSpark()
+
+if not hasattr(ss, "read"):
+    raise RuntimeError(
+        "SNESS inicializada sem o atributo read."
+    )
+
+if not hasattr(ss.read, "parquet"):
+    raise RuntimeError(
+        "SNESS inicializada sem o metodo read.parquet."
+    )
+
+print("SNESS Spark inicializada com sucesso.")
+
+# ============================================================
+# 10. IDENTIFICAR VERSOES
+# ============================================================
+
+def obter_versao_sness(diretorio, pacote):
+
+    # Primeiro verifica a distribuicao instalada
+    try:
+        return md.version(pacote), "Instalada"
+    except md.PackageNotFoundError:
+        pass
+
+    # Caso contrario, consulta o codigo-fonte
+    arquivo = diretorio / "pyproject.toml"
+
+    if not arquivo.is_file():
+        return "Nao identificada", "Indisponivel"
+
+    with arquivo.open("rb") as f:
+        config = tomllib.load(f)
+
+    versao = (
+        config.get("project", {}).get("version")
+        or config.get("tool", {})
+                 .get("poetry", {})
+                 .get("version")
+        or "Nao identificada"
+    )
+
+    return versao, "Codigo-fonte"
+
+
+versao_common, origem_common = obter_versao_sness(
+    COMMON_ROOT,
+    "sness-lib-common"
+)
+
+versao_spark, origem_spark = obter_versao_sness(
+    SPARK_ROOT,
+    "sness-lib-spark"
+)
+
+# ============================================================
+# 11. VALIDAR INICIALIZACAO
+# ============================================================
+
+validacoes = {
+    "Spark": spark is not None,
+    "SNESS Common": COMMON.is_dir(),
+    "SNESS Spark": SPARK.is_dir(),
+    "Environment": Environment is not None,
+    "Zone": Zone is not None,
+    "SNESS ss": ss is not None,
+    "Leitor Parquet": hasattr(ss.read, "parquet")
+}
+
+# ============================================================
+# 12. RESULTADO FINAL
+# ============================================================
+
+print()
+print("=" * 60)
+print("BIBLIOTECAS SNESS - INICIALIZACAO")
+print("=" * 60)
+
+print(f"Sness Common : {versao_common} ({origem_common})")
+print(f"Sness Spark  : {versao_spark} ({origem_spark})")
+print(f"Apache Spark : {spark.version}")
+print(f"Usuario      : {current_user}")
+print(f"Classe ss    : {type(ss).__name__}")
+
+print("-" * 60)
+
+for componente, resultado in validacoes.items():
+    status = "OK" if resultado else "ERRO"
+    print(f"[{status}] {componente}")
+
+print("=" * 60)
+
+if all(validacoes.values()):
+    print("SNESS INICIALIZADA E LEITOR DISPONIVEL")
+else:
+    raise RuntimeError(
+        "Falha na validacao dos componentes SNESS."
+    )
+
+
+# COMMAND ----------
+
+# Validação do Sness sem GCP Manager
+import sys
 import traceback
 from pathlib import Path
 
-
-MODULOS = {
-    "metadata": "sness.datalake.metadata",
-    "spark": "sness.datalake.sness_spark"
-}
-
-ARQUIVOS = {
-    "metadata": "metadata.py",
-    "spark": "sness_spark.py"
-}
-
-# Limita a busca para evitar varrer todo o armazenamento
-# do Workspace ou dos Volumes.
-PROFUNDIDADE_MAXIMA = 7
-
-# Pastas ignoradas durante a descoberta.
-IGNORAR = {
-    ".git",
-    ".venv",
-    "venv",
-    "__pycache__",
-    ".cache",
-    "node_modules",
-    ".ipynb_checkpoints"
-}
-
-
-def diretorios_busca():
-    """
-    Identifica diretorios relevantes do ambiente atual.
-    """
-
-    candidatos = []
-
-    # Diretorio atual
-    candidatos.append(Path.cwd())
-
-    # Diretorios do Python
-    for caminho in sys.path:
-        if caminho:
-            candidatos.append(Path(caminho))
-
-    # Bibliotecas instaladas
-    try:
-        candidatos.extend(
-            Path(p) for p in site.getsitepackages()
-        )
-    except Exception:
-        pass
-
-    try:
-        candidatos.append(Path(site.getusersitepackages()))
-    except Exception:
-        pass
-
-    # Workspace Databricks
-    candidatos.append(Path("/Workspace"))
-
-    # Variavel opcional para projetos em local personalizado.
-    # Exemplo:
-    # os.environ["SNESS_PROJECT_ROOT"] = "/Workspace/Users/.../projeto"
-    raiz_extra = os.environ.get("SNESS_PROJECT_ROOT")
-
-    if raiz_extra:
-        candidatos.append(Path(raiz_extra))
-
-    resultado = []
-    vistos = set()
-
-    for caminho in candidatos:
-        try:
-            caminho = caminho.resolve()
-
-            if caminho.is_dir() and str(caminho) not in vistos:
-                resultado.append(caminho)
-                vistos.add(str(caminho))
-
-        except (OSError, RuntimeError):
-            continue
-
-    return resultado
-
-
-def localizar_fontes():
-    """
-    Procura:
-      sness/datalake/metadata.py
-      sness/datalake/sness_spark.py
-
-    Retorna os diretorios pais de 'sness'.
-    """
-
-    encontrados = {
-        "metadata": set(),
-        "spark": set()
-    }
-
-    for raiz in diretorios_busca():
-
-        profundidade_raiz = len(raiz.parts)
-
-        try:
-            for atual, pastas, arquivos in os.walk(raiz):
-
-                atual_path = Path(atual)
-
-                profundidade = (
-                    len(atual_path.parts) - profundidade_raiz
-                )
-
-                if profundidade >= PROFUNDIDADE_MAXIMA:
-                    pastas[:] = []
-                    continue
-
-                pastas[:] = [
-                    p for p in pastas
-                    if p not in IGNORAR
-                ]
-
-                # So aceita a estrutura real do pacote.
-                if (
-                    atual_path.name != "datalake"
-                    or atual_path.parent.name != "sness"
-                ):
-                    continue
-
-                for chave, arquivo in ARQUIVOS.items():
-
-                    if arquivo in arquivos:
-
-                        raiz_pacote = atual_path.parent.parent
-
-                        encontrados[chave].add(
-                            str(raiz_pacote)
-                        )
-
-        except (OSError, PermissionError):
-            continue
-
-    return encontrados
-
-
-def validar_imports():
-    """
-    Testa imports sem modificar o ambiente.
-    """
-
-    resultado = {}
-
-    for chave, modulo in MODULOS.items():
-
-        try:
-            spec = importlib.util.find_spec(modulo)
-
-            resultado[chave] = (
-                spec is not None
-                and spec.origin is not None
-            )
-
-        except (ImportError, ModuleNotFoundError):
-            resultado[chave] = False
-
-    return resultado
-
-
-print("=" * 65)
-print("DIAGNOSTICO SNESS - DATABRICKS")
-print("=" * 65)
-
-print("\n1. Verificando modulos existentes...")
-
-estado = validar_imports()
-
-for chave, encontrado in estado.items():
-    print(
-        f"{MODULOS[chave]}:",
-        "ENCONTRADO" if encontrado else "NAO ENCONTRADO"
-    )
-
-
-# ============================================================
-# DESCOBERTA AUTOMATICA
-# ============================================================
-
-if not all(estado.values()):
-
-    print("\n2. Procurando bibliotecas SNESS...")
-
-    encontrados = localizar_fontes()
-
-    for chave, caminhos in encontrados.items():
-
-        if caminhos:
-
-            for caminho in sorted(caminhos):
-                print(
-                    f"[ENCONTRADO] {chave}: {caminho}"
-                )
-
-        else:
-            print(
-                f"[NAO ENCONTRADO] {chave}"
-            )
-
-    # Adiciona caminhos de codigo-fonte encontrados.
-    # Nao modifica permanentemente o ambiente.
-    novos_caminhos = sorted(
-        set().union(*encontrados.values())
-    )
-
-    for caminho in novos_caminhos:
-
-        if caminho not in sys.path:
-
-            sys.path.append(caminho)
-
-            print(
-                "[SYS.PATH ADICIONADO]",
-                caminho
-            )
-
-    importlib.invalidate_caches()
-
-else:
-
-    print(
-        "\n2. Modulos ja disponiveis no ambiente."
-    )
-
-
-# ============================================================
-# VALIDACAO FINAL
-# ============================================================
-
-print("\n3. Validando imports reais...")
-
 try:
+    # Valida os caminhos das bibliotecas
+    for nome, caminho in {
+        "Sness Common": sness_common_path,
+        "Sness Spark": sness_spark_path
+    }.items():
+        if not Path(caminho).is_dir():
+            raise FileNotFoundError(
+                f"{nome}: diretório não encontrado: {caminho}"
+            )
 
+        # Adiciona o código-fonte ao Python Path
+        if caminho not in sys.path:
+            sys.path.insert(0, caminho)
+
+        print(f"[OK] Caminho {nome}: {caminho}")
+
+    # Valida Sness Common
     from sness.datalake.metadata import Environment, Zone
-
     print("[OK] Environment e Zone")
 
+    # Valida Sness Spark
     from sness.datalake.sness_spark import SnessSpark
-
     print("[OK] SnessSpark")
-
-    import sness.datalake.metadata as metadata
-    import sness.datalake.sness_spark as sness_spark
-
-    print("\n4. Caminhos carregados:")
-
-    print(
-        "Metadata:",
-        metadata.__file__
-    )
-
-    print(
-        "SnessSpark:",
-        sness_spark.__file__
-    )
 
     print("\nIMPORTS SNESS VALIDADOS COM SUCESSO")
 
 except Exception:
-
-    print("\n[ERRO] Falha ao importar SNESS:")
-    traceback.print_exc()
-
-print("=" * 65)
-
-
-# COMMAND ----------
-
-# Validação do sness sem GCP Manager
-try:
-    from sness.datalake.metadata import Environment, Zone
-    print("[OK] Environment e Zone")
-
-    from sness.datalake.sness_spark import SnessSpark
-    print("[OK] SnessSpark")
-
-    print("\nIMPORTS SNESS VALIDADOS COM SUCESSO")
-
-except Exception as e:
-    import traceback
+    print("\n[ERRO] Falha na validação das bibliotecas SNESS")
     traceback.print_exc()
 
 # COMMAND ----------
@@ -549,21 +569,13 @@ print("Spark:", ss.spark.version)
 
 # COMMAND ----------
 
-# ============================================================
-# CRIAR VOLUME - VISAO UNICA DE PRECOS
-# ============================================================
-spark.sql("""
-    CREATE SCHEMA IF NOT EXISTS
-    `demo-catalog`.visao_unica_precos
-""")
-
-print("Schema criado com sucesso.")
+# CRIE OS VOLUMES
 
 # COMMAND ----------
 
 # Validar criação de volumes
 spark.sql("""
-SHOW VOLUMES IN `demo-catalog`.visao_unica_precos
+SHOW VOLUMES IN `test`.default
 """).show(truncate=False)
 
 # COMMAND ----------
@@ -590,7 +602,7 @@ print("Spark:", spark.version)
 # ============================================================
 
 DESTINO_PARQUET = (
-    "/Volumes/demo-catalog/visao_unica_precos/"
+    "/Volumes/test/default/"
     "dados_origin_visao_unica/parquet"
 )
 
@@ -644,7 +656,7 @@ print(f"Total de registros: {total}/252")
 
 # Criar o diretório de saída
 destino = (
-    "/Volumes/demo-catalog/visao_unica_precos/"
+    "/Volumes/test/default/dados_origin_visao_unica/"
     "resultados"
 )
 
@@ -663,6 +675,225 @@ print("[OK] Diretório preparado")
 
 # COMMAND ----------
 
+# Alterar caminhos dos volumes no arquivo pois não buscará mais da cloud /Workspace/Users/marco.vieira@marlabs.com/Magalu-visao-unica-precos/03_CONFIGURAÇÕES/BIBLIOTECA_SNESS/sness-spark-main/sness/datalake/sness_spark.py
+
+# COMMAND ----------
+
+# Reinicia o interpretador Python do notebook
+# e limpa chach da memória
+
+dbutils.library.restartPython()
+print('Python reiniciado')
+
+# COMMAND ----------
+
+
+# RECARREGAR SNESS SPARK DO WORKSPACE SEM REINSTALAR
+# ============================================================
+
+import sys
+import os
+import importlib
+import importlib.util
+import importlib.machinery
+from pathlib import Path
+
+# ============================================================
+# 1. IDENTIFICAR USUARIO E CAMINHOS
+# ============================================================
+
+current_user = spark.sql(
+    "SELECT current_user()"
+).first()[0]
+
+base_path = (
+    f"/Workspace/Users/{current_user}/"
+    "Magalu-visao-unica-precos/"
+    "03_CONFIGURAÇÕES/BIBLIOTECA_SNESS"
+)
+
+sness_common_path = f"{base_path}/sness-common-main"
+sness_spark_path = f"{base_path}/sness-spark-main"
+
+COMMON = Path(sness_common_path) / "sness"
+SPARK = Path(sness_spark_path) / "sness"
+
+COMMON_DATALAKE = COMMON / "datalake"
+SPARK_DATALAKE = SPARK / "datalake"
+
+COMMON_SETTINGS = COMMON / "settings"
+SPARK_SETTINGS = SPARK / "settings"
+
+ARQUIVO_SPARK = SPARK_DATALAKE / "sness_spark.py"
+
+# ============================================================
+# 2. VALIDAR ARQUIVOS
+# ============================================================
+
+arquivos = {
+    "SNESS Common Metadata":
+        COMMON_DATALAKE / "metadata.py",
+    "SNESS Common Storage":
+        COMMON / "storage" / "__init__.py",
+    "SNESS Common Cloud Config":
+        COMMON_SETTINGS / "cloud_config.py",
+    "SNESS Spark":
+        ARQUIVO_SPARK
+}
+
+for nome, arquivo in arquivos.items():
+    if not arquivo.is_file():
+        raise FileNotFoundError(
+            f"{nome} nao encontrado: {arquivo}"
+        )
+
+    print(f"[OK] {nome}")
+
+# ============================================================
+# 3. CONFIGURAR AMBIENTE
+# ============================================================
+
+os.environ["SNESS_DATABRICKS_SERVERLESS"] = "true"
+
+# ============================================================
+# 4. PRIORIDADE DO PACOTE SNESS
+# ============================================================
+
+import sness
+
+def priorizar_caminhos(pacote, caminhos):
+    atuais = list(pacote.__path__)
+    novos = [str(p) for p in caminhos if Path(p).is_dir()]
+
+    pacote.__path__[:] = (
+        novos +
+        [p for p in atuais if p not in novos]
+    )
+
+priorizar_caminhos(
+    sness,
+    [SPARK, COMMON]
+)
+
+# ============================================================
+# 5. PRIORIDADE DO DATALAKE
+# ============================================================
+
+import sness.datalake
+
+priorizar_caminhos(
+    sness.datalake,
+    [SPARK_DATALAKE, COMMON_DATALAKE]
+)
+
+# ============================================================
+# 6. PRIORIDADE DO SETTINGS
+# ============================================================
+
+import sness.settings
+
+priorizar_caminhos(
+    sness.settings,
+    [COMMON_SETTINGS, SPARK_SETTINGS]
+)
+
+# ============================================================
+# 7. ATUALIZAR CACHE
+# ============================================================
+
+importlib.invalidate_caches()
+
+# ============================================================
+# 8. VERIFICAR O ARQUIVO ANTES DE RECARREGAR
+# ============================================================
+
+spec = importlib.machinery.PathFinder.find_spec(
+    "sness.datalake.sness_spark",
+    sness.datalake.__path__
+)
+
+if spec is None or spec.origin is None:
+    raise ModuleNotFoundError(
+        "Nao foi possivel localizar sness_spark.py"
+    )
+
+arquivo_encontrado = Path(spec.origin).resolve()
+arquivo_esperado = ARQUIVO_SPARK.resolve()
+
+print("\n===== VALIDACAO DO CAMINHO =====")
+print("Esperado  :", arquivo_esperado)
+print("Encontrado:", arquivo_encontrado)
+
+if arquivo_encontrado != arquivo_esperado:
+    raise RuntimeError(
+        "O Python ainda nao aponta para a SNESS Spark "
+        "atualizada no Workspace."
+    )
+
+# ============================================================
+# 9. RECARREGAR O MODULO
+# ============================================================
+
+nome_modulo = "sness.datalake.sness_spark"
+
+modulo_anterior = sys.modules.get(nome_modulo)
+
+if modulo_anterior is not None:
+    # Atualiza a especificacao para o arquivo do Workspace
+    modulo_anterior.__spec__ = spec
+    modulo_anterior.__loader__ = spec.loader
+    modulo_anterior.__file__ = spec.origin
+
+    modulo_spark = importlib.reload(modulo_anterior)
+else:
+    modulo_spark = importlib.import_module(nome_modulo)
+
+# ============================================================
+# 10. VALIDAR A ORIGEM REAL
+# ============================================================
+
+origem_real = Path(modulo_spark.__file__).resolve()
+
+print("\n===== SNESS SPARK RECARREGADA =====")
+print("Arquivo:", origem_real)
+
+if origem_real != arquivo_esperado:
+    raise RuntimeError(
+        "A SNESS Spark nao foi carregada do Workspace."
+    )
+
+# ============================================================
+# 11. ATUALIZAR CLASSE E INSTANCIA
+# ============================================================
+
+SnessSpark = modulo_spark.SnessSpark
+
+# Cria nova instancia usando a classe recarregada
+ss = SnessSpark()
+
+print("[OK] Classe SnessSpark atualizada")
+print("[OK] Instancia ss recriada")
+
+# ============================================================
+# 12. RESULTADO FINAL
+# ============================================================
+
+print("\n" + "=" * 60)
+print("RECARREGAMENTO SNESS SPARK")
+print("=" * 60)
+
+print("Usuario:", current_user)
+print("Origem :", modulo_spark.__file__)
+print("Classe :", SnessSpark.__name__)
+print("Leitor :", hasattr(ss, "read"))
+print("Writer :", hasattr(ss, "write"))
+
+print("=" * 60)
+print("[OK] RECARREGAMENTO CONCLUIDO")
+
+
+# COMMAND ----------
+
 
 # # Testar gravação no Databricks utilizando Writer.save()
 import os
@@ -677,7 +908,7 @@ os.environ["SNESS_DATABRICKS_SERVERLESS"] = "true"
 
 ss = SnessSpark()
 
-VOLUME = "/Volumes/demo-catalog/visao_unica_precos/resultados"
+VOLUME = "/Volumes/test/default/dados_origin_visao_unica/resultados"
 DATASET = "teste_save_sness_001"
 CAMINHO_ESPERADO = f"{VOLUME}/{DATASET}"
 
@@ -749,13 +980,17 @@ except Exception:
 
 # COMMAND ----------
 
+# Correção no arquivo utils.py preparando o config_spark() para o ambiente databricks
+
+# COMMAND ----------
+
 # Verifica a estrutura de pastas do Build
 current_user = spark.sql("SELECT current_user()").collect()[0][0]
 import os
 
 raiz = (
     f"/Workspace/Users/{current_user}/"
-    "PROJETO_VISAO_UNICA_PRECOS/"
+    "Magalu-visao-unica-precos/"
     "03_CONFIGURAÇÕES/BIBLIOTECA_SNESS/sness-spark-main"
 )
 
@@ -779,36 +1014,83 @@ print("\nTotal de diretórios:", len(resultados))
 
 # COMMAND ----------
 
-# Testar Leitura dos resultados gravados no Databricks
-import os
-import traceback
+# ============================================================
+# TESTE DE LEITURA SNESS SPARK - CODIGO ORIGINAL
+# ============================================================
 
-os.environ["SNESS_DATABRICKS_SERVERLESS"] = "true"
+import os
+import inspect
+import traceback
 
 from sness.datalake.sness_spark import SnessSpark
 from sness.datalake.metadata import Environment, Zone
 
+os.environ["SNESS_DATABRICKS_SERVERLESS"] = "true"
+
+# ============================================================
+# 1. CONFIGURACAO
+# ============================================================
+
+VOLUME_ORIGEM = "/Volumes/test/default/dados_origin_visao_unica"
+VOLUME_RESULTADOS = "/Volumes/test/default/resultados"
+
+DATASET = "teste_save_sness_001"
+
+print("===== TESTE LEITURA SNESS =====")
+print("Biblioteca:", inspect.getfile(SnessSpark))
+print("Volume origem:", VOLUME_ORIGEM)
+print("Volume resultados:", VOLUME_RESULTADOS)
+print("Dataset:", DATASET)
+
+# ============================================================
+# 2. INICIALIZAR SNESS
+# ============================================================
+
 ss = SnessSpark()
 
+# ============================================================
+# 3. EXECUTAR METODO ORIGINAL
+# ============================================================
+
 try:
+
     df = ss.read.parquet(
         environment=Environment.PRODUCTION,
         zone=Zone.TRUSTED,
         namespace="teste",
-        dataset="teste_escrita_sness"
+        dataset=DATASET
     )
 
-    print("1. Leitura pelo Sness: OK")
-    print("2. Registros:", df.count())
+    print("\n1. Metodo ss.read.parquet executado")
+
+    # Forca a leitura real
+    quantidade = df.count()
+
+    print("2. Registros:", quantidade)
     print("3. Colunas:", df.columns)
 
-except Exception:
-    traceback.print_exc(limit=8)
+    assert quantidade == 3, (
+        f"Esperados 3 registros, encontrados {quantidade}"
+    )
+
+    assert df.columns == ["id", "descricao"], (
+        f"Colunas inesperadas: {df.columns}"
+    )
+
+    print("\n[OK] TESTE LEITURA SNESS APROVADO")
+
+except Exception as erro:
+
+    print("\n[ERRO] TESTE LEITURA SNESS REPROVADO")
+    print("Tipo:", type(erro).__name__)
+    print("Mensagem:", str(erro).split("JVM stacktrace:")[0])
+
+    traceback.print_exc(limit=4)
 
 # COMMAND ----------
 
 # Inicializar os datasets de saída
-base = "/Volumes/demo-catalog/visao_unica_precos/dados_origin_visao_unica"
+base = "/Volumes/test/default/dados_origin_visao_unica"
 
 datasets = [
     "prices",

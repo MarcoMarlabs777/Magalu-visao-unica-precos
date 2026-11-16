@@ -3,8 +3,8 @@
 # [tool.databricks.environment]
 # environment_version = "6"
 # ///
-ORIGEM = '/Volumes/demo-catalog/visao_unica_precos/dados_origin_visao_unica/parquet'
-DESTINO = "/Volumes/demo-catalog/visao_unica_precos/dados_origin_visao_unica/parquet_volumetria_final"
+ORIGEM = '/Volumes/test/default/dados_origin_visao_unica/parquet'
+DESTINO = "/Volumes/test/default/dados_origin_visao_unica/parquet_volumetria_final"
 
 
 EXECUTAR_GRAVACAO = True
@@ -13,18 +13,18 @@ LIMITE_AMOSTRA = 628890840
 
 # Volumetria Alvo para cada base
 ALVOS = {
-    "base_prices_current": 209630280,
-    "products_discounts": 3780819,
-    "selling_prices2_current": 236959643,
-    "discounts_v2": 28836725,
-    "robinhood_campaigns": 4381282,
-    "robinhood_campaign_products": 108024399,
-    "campaigns_v2": 474365106,
-    "payment_methods": 18,
-    "visao_catalogo_produto_atual": 511653317,
-    "prices": 209630280,
-    "prices_historic": 628890840,
-    "prices_penultimate_execution": 209630280
+    "selling_prices2_current": 901802225,
+    "base_prices_current": 776858317,
+    "prices": 15983801,
+    "prices_penultimate_execution": 164465199,
+    "robinhood_campaign_products": 73199718,
+    "campaigns_v2": 35210395,
+    "visao_catalogo_produto_atual": 32201680,
+    "prices_historic": 18374983,
+    "robinhood_campaigns": 1429841,
+    "discounts_v2": 572498,
+    "products_discounts": 91253,
+    "payment_methods": 36
 }
 
 print("ORIGEM:", ORIGEM)
@@ -32,8 +32,21 @@ print("DESTINO:", DESTINO)
 
 # COMMAND ----------
 
+CALIBRACAO_ATIVA = True
 
-# Databricks Serverless - Gerador V5
+COLUNAS_TEXTO_CALIBRACAO = {
+    "campaigns_v2": "description",
+    "visao_catalogo_produto_atual": "description",
+    "robinhood_campaigns": "description",
+    "discounts_v2": "description"
+}
+
+FATOR_TEXTO = 1.3
+MAX_CARACTERES_CALIBRACAO = 512
+
+# COMMAND ----------
+
+# Databricks Serverless - Gerador V13 (Snappy seletivo, sem amostragem)
 # Volumetria com referencias sinteticas consistentes.
 #
 # EXECUTE primeiro a celula de configuracao.
@@ -45,6 +58,17 @@ print("DESTINO:", DESTINO)
 
 from pyspark.sql import functions as F, types as T
 import math
+
+# SEGURANCA: permanece False ate autorizacao explicita.
+EXECUTAR_GRAVACAO = True
+
+# Somente cinco datasets terao dictionary encoding desativado; codec Snappy em todos.
+DATASETS_AJUSTE_FISICO = {
+    "selling_prices2_current", "base_prices_current", "prices",
+    "prices_penultimate_execution", "visao_catalogo_produto_atual"
+}
+# Nao altera chaves nem adiciona colunas; evita modificar regras do pipeline.
+CALIBRACAO_ATIVA = False
 
 
 # ============================================================
@@ -171,7 +195,7 @@ def calcular_particoes(quantidade):
 
 
 print('=' * 65)
-print('CONFIGURACAO GERADOR V5')
+print('CONFIGURACAO GERADOR V13')
 print('=' * 65)
 
 print('ORIGEM:', ORIGEM)
@@ -259,7 +283,7 @@ for filho, pai in relacoes.items():
 # ============================================================
 
 print()
-print('PLANEJAMENTO V5')
+print('PLANEJAMENTO V13')
 
 for n in ALVOS:
 
@@ -284,18 +308,36 @@ print()
 # 6. FUNCOES AUXILIARES
 # ============================================================
 
-def id_logico(nome, indice):
+# Limita cardinalidade: valores repetidos comprimem melhor.
+# Ajustavel na celula de configuracao, sem alterar ALVOS.
+# Cardinalidade padrao; pode ser definida na celula anterior.
+CARDINALIDADE_SINTETICA = globals().get('CARDINALIDADE_SINTETICA', 14_000_000)
 
-    return F.substring(
-        F.sha2(
-            F.concat(
-                F.lit('V5|' + nome + '|'),
-                indice.cast('string')
-            ),
-            256
-        ),
-        1,
-        32
+CARDINALIDADE_POR_DATASET = {
+    'selling_prices2_current': 15_000_000,
+    'base_prices_current': 54_000_000,
+    'prices': 136_000_000,
+    'prices_penultimate_execution': 48_000_000,
+    'robinhood_campaign_products': 1200_000,
+    'campaigns_v2': 51_400_000,
+    'visao_catalogo_produto_atual': 520_000_000,
+    'prices_historic': 300_000,
+    'robinhood_campaigns': 1600_000,
+    'discounts_v2': 1400_000,
+    'products_discounts': 10_000,
+    'payment_methods': 36,
+}
+CARDINALIDADE_ATUAL = CARDINALIDADE_SINTETICA
+if type(CARDINALIDADE_SINTETICA) is not int or CARDINALIDADE_SINTETICA < 1:
+    raise ValueError('CARDINALIDADE_SINTETICA deve ser inteiro positivo')
+
+def id_logico(nome, indice):
+    return F.concat(
+        F.lit('SYN_' + nome + '_'),
+        F.lpad(
+            F.pmod(indice.cast('long'), F.lit(CARDINALIDADE_ATUAL))
+             .cast('string'), 4, '0'
+        )
     )
 
 
@@ -328,6 +370,85 @@ def campo(df, nome, valor):
         nome,
         valor.cast(tipo)
     )
+
+
+# ============================================================
+# 6A. CALIBRACAO DE TAMANHO - SOMENTE COLUNAS AUTORIZADAS
+# ============================================================
+# IMPORTANTE: a meta de bytes NAO pode ser garantida por escrita Parquet.
+# Preencha as colunas APOS conferir os schemas e as regras do pipeline.
+# Somente colunas STRING, nao usadas em JOIN/filtro/regra de negocio.
+# Sem colunas autorizadas, nenhuma alteracao de conteudo e aplicada.
+# Nunca adiciona coluna ao schema final.
+
+CALIBRACAO_ATIVA = False
+COLUNAS_TEXTO_CALIBRACAO = globals().get('COLUNAS_TEXTO_CALIBRACAO', {
+    # Exemplo APENAS se existir e for comprovadamente nao critica:
+    # 'selling_prices2_current': 'description',
+})
+# Tamanhos observados na ultima validacao (bytes decimais).
+# Ajuste estes valores ao executar novas rodadas.
+TAMANHOS_BASE_BYTES = {
+    'selling_prices2_current': 8.71e9,
+    'base_prices_current': 2.21e9,
+    'prices': 176.97e6,
+    'prices_penultimate_execution': 1.54e9,
+    'robinhood_campaign_products': 508.46e6,
+    'campaigns_v2': 389.97e6,
+    'visao_catalogo_produto_atual': 152.40e6,
+    'prices_historic': 188.47e6,
+    'robinhood_campaigns': 19.73e6,
+    'discounts_v2': 20.70e6,
+    'products_discounts': 1.25e6,
+    'payment_methods': 9.49e3,
+}
+# Estimativa conservadora de bytes adicionais de texto por registro.
+# Ajustar com base na medicao, pois Snappy/dicionario afetam o resultado.
+FATOR_TEXTO = globals().get('FATOR_TEXTO', 1.3)
+MAX_CARACTERES_CALIBRACAO = globals().get('MAX_CARACTERES_CALIBRACAO', 512)
+
+
+def verificar_colunas_calibracao():
+    for nome, coluna in COLUNAS_TEXTO_CALIBRACAO.items():
+        if nome not in originais:
+            raise ValueError(f'Dataset desconhecido para calibracao: {nome}')
+        if coluna not in originais[nome].columns:
+            raise ValueError(f'{nome}: coluna inexistente: {coluna}')
+        if not isinstance(originais[nome].schema[coluna].dataType, T.StringType):
+            raise TypeError(f'{nome}.{coluna}: calibracao exige STRING')
+        bloqueadas = ('id', 'sku', 'seller', 'key', 'code', 'date', 'time', 'status',
+                      'price', 'category', 'brand', 'channel', 'currency', 'op',
+                      'action', 'type', 'benefit', 'method')
+        if any(token in coluna.lower() for token in bloqueadas):
+            raise ValueError(f'{nome}.{coluna}: nome potencialmente critico; nao calibrar')
+
+
+def calibrar_texto(df, nome):
+    if not CALIBRACAO_ATIVA or nome not in COLUNAS_TEXTO_CALIBRACAO:
+        return df
+    coluna = COLUNAS_TEXTO_CALIBRACAO[nome]
+    faltantes = max(0.0, TAMANHO_REAL_BYTES[nome] - TAMANHOS_BASE_BYTES[nome])
+    if faltantes <= 0:
+        print(f'[CALIBRACAO] {nome}: acima da referencia, sem expansao')
+        return df
+    # __seq existe somente no DataFrame sintetico.
+    caracteres = min(MAX_CARACTERES_CALIBRACAO,
+                     max(1, math.ceil(faltantes / max(1, qtd_syn[nome]) * FATOR_TEXTO)))
+    # Hash SHA-256 hexadecimal variavel por linha, repetido apenas se necessario.
+    # O tamanho real comprimido sera medido pelo validador.
+    hash_ = F.sha2(F.concat(F.lit(nome), F.col('__seq').cast('string')), 256)
+    texto = F.substring(F.repeat(hash_, math.ceil(caracteres / 64)), 1, caracteres)
+    print(f'[CALIBRACAO] {nome}.{coluna}: ate {caracteres} caracteres sinteticos/linha')
+    return df.withColumn(coluna, texto)
+
+
+verificar_colunas_calibracao()
+if not COLUNAS_TEXTO_CALIBRACAO:
+    print('[CALIBRACAO] Nenhuma coluna autorizada: geracao permanece inalterada.')
+    print('[COLUNAS CANDIDATAS - SOMENTE INSPECAO]')
+    for n, d in originais.items():
+        cols = [f.name for f in d.schema.fields if isinstance(f.dataType, T.StringType)]
+        print(f'  {n}: {cols}')
 
 
 # ============================================================
@@ -378,7 +499,8 @@ def sinteticos(nome):
 
     df = base.limit(1).crossJoin(seq)
 
-    idx = F.col('__seq')
+    # Ciclo curto de valores para favorecer dictionary encoding.
+    idx = F.pmod(F.col('__seq'), F.lit(CARDINALIDADE_ATUAL))
 
     n_prod = qtd_syn['base_prices_current']
     n_desc = qtd_syn['discounts_v2']
@@ -589,360 +711,585 @@ def sinteticos(nome):
         F.lit(None)
     )
 
+    df = calibrar_texto(df, nome)
     return df.select(
         *base.columns
     )
 
 
 # ============================================================
-# 8. GRAVACAO DOS ARQUIVOS PARQUET
+# 8. GRAVACAO - REFERENCIA FISICA E COMPRESSAO DOS DADOS REAIS
 # ============================================================
+# Quantidades de LINHAS continuam vindo SOMENTE de ALVOS.
+# ATENCAO: chaves repetidas podem alterar JOINs, DISTINCT e skew.
+# Para teste de volumetria, nao para equivalencia funcional.
+# Os valores abaixo controlam exclusivamente o layout fisico.
+
+ARQUIVOS_REFERENCIA = {
+    'selling_prices2_current': 3044,
+    'base_prices_current': 741,
+    'prices': 79,
+    'prices_penultimate_execution': 79,
+    'robinhood_campaign_products': 867,
+    'campaigns_v2': 393,
+    'visao_catalogo_produto_atual': 564,
+    'prices_historic': 11,
+    'robinhood_campaigns': 1730,
+    'discounts_v2': 937,
+    'products_discounts': 4,
+    'payment_methods': 2,
+}
+
+# Valores informativos para a validacao posterior; nao sao metas
+# de escrita em bytes, pois compressibilidade depende dos dados.
+TAMANHO_REAL_BYTES = {
+    'selling_prices2_current': 19.7 * 10**9,
+    'base_prices_current': 14.1 * 10**9,
+    'prices': 6.1 * 10**9,
+    'prices_penultimate_execution': 6.1 * 10**9,
+    'robinhood_campaign_products': 744.5 * 10**6,
+    'campaigns_v2': 1.3 * 10**9,
+    'visao_catalogo_produto_atual': 8.8 * 10**9,
+    'prices_historic': 65.9 * 10**6,
+    'robinhood_campaigns': 96.0 * 10**6,
+    'discounts_v2': 85.6 * 10**6,
+    'products_discounts': 0.6 * 10**6,
+    'payment_methods': 9.6 * 10**3,
+}
+
+# Coluna fisica de particionamento, quando identificavel no schema.
+# Nunca cria uma coluna nova e nao altera ALVOS.
+CANDIDATAS_DATA = {
+    'robinhood_campaign_products': ['timestamp_kafka_day', 'price_date'],
+    'campaigns_v2': ['timestamp_kafka_day', 'price_date'],
+    'prices_historic': ['price_date', 'timestamp_kafka_day'],
+    'robinhood_campaigns': ['timestamp_kafka_day', 'price_date'],
+    'discounts_v2': ['timestamp_kafka_day', 'price_date'],
+    'products_discounts': ['timestamp_kafka_day', 'price_date'],
+}
+
+# A imagem de referencia mostra 41, 22, 1, 43, 43 e 4 dias,
+# respectivamente. Este script preserva as datas efetivamente
+# presentes no DataFrame; nao inventa nem altera distribuicoes.
+DIAS_REFERENCIA = {
+    'robinhood_campaign_products': 41,
+    'campaigns_v2': 22,
+    'prices_historic': 1,
+    'robinhood_campaigns': 43,
+    'discounts_v2': 43,
+    'products_discounts': 4,
+}
+
+# Evita que configuracoes de outras celulas desabilitem o layout
+# de referencia na gravacao. PARTICIONAMENTO continua sendo usado
+# pela funcao de geracao de registros sinteticos (secao 7).
+
+
+def arquivos_parquet_recursivo(path):
+    encontrados = []
+    for item in dbutils.fs.ls(path):
+        if item.isDir():
+            encontrados.extend(arquivos_parquet_recursivo(item.path))
+        elif item.path.lower().endswith('.parquet'):
+            encontrados.append(item)
+    return encontrados
+
+
+def escolher_coluna_data(nome, dados):
+    for coluna in CANDIDATAS_DATA.get(nome, []):
+        if coluna in dados.columns:
+            return coluna
+    return None
+
+
+if EXECUTAR_GRAVACAO and CALIBRACAO_ATIVA and not COLUNAS_TEXTO_CALIBRACAO:
+    raise ValueError('Defina COLUNAS_TEXTO_CALIBRACAO antes de executar a gravacao V13; veja candidatas acima.')
 
 if EXECUTAR_GRAVACAO:
-
-    # --------------------------------------------------------
-    # VERIFICACAO DO DESTINO
-    # --------------------------------------------------------
-
+    # Protecao original: nao sobrescrever um destino ja existente.
     try:
         dbutils.fs.ls(DESTINO)
-
     except Exception as exc:
-
-        if not any(
-            t in str(exc).lower()
-            for t in (
-                'not found',
-                'does not exist',
-                'filenotfound',
-                'path_not_found'
-            )
-        ):
+        if not any(t in str(exc).lower() for t in (
+            'not found', 'does not exist', 'filenotfound', 'path_not_found'
+        )):
             raise
-
     else:
         raise RuntimeError(
-            f'DESTINO JA EXISTE: {DESTINO}; '
-            f'escolha outro destino'
+            f'DESTINO JA EXISTE: {DESTINO}; escolha outro destino'
         )
-
-    # --------------------------------------------------------
-    # PROCESSAMENTO DAS TABELAS
-    # --------------------------------------------------------
 
     for nome in ALVOS:
+        CARDINALIDADE_ATUAL = CARDINALIDADE_POR_DATASET.get(nome, CARDINALIDADE_SINTETICA)
+        print(f'\n[GERANDO] {nome} | meta linhas={metas[nome]:,}')
+        dados = (
+            originais[nome] if qtd_syn[nome] == 0
+            else originais[nome].unionByName(sinteticos(nome))
+        )
 
+        alvo_arquivos = ARQUIVOS_REFERENCIA.get(nome)
+        if alvo_arquivos is None:
+            raise ValueError(f'Sem referencia de arquivos: {nome}')
+
+        # Em modo amostra, evita criar milhares de arquivos vazios.
+        if MODO_AMOSTRA:
+            alvo_arquivos = min(alvo_arquivos, max(1, metas[nome]))
+
+        caminho = f'{DESTINO.rstrip("/")}/{nome}'
+
+        # Sem partitionBy: nenhuma pasta fisica por data.
+        # Spark continua usando particoes internas para escrever.
+        CODEC = "snappy"
+        DICIONARIO = "false" if nome in DATASETS_AJUSTE_FISICO else "true"
+        dados = dados.repartition(alvo_arquivos)
+        print(f'[SEM PARTITIONBY] tarefas de escrita={alvo_arquivos}')
+        print(f'[CARDINALIDADE] {CARDINALIDADE_ATUAL:,} | codec={CODEC} | dictionary={DICIONARIO}')
+
+        # Snappy para todos; desabilita dictionary encoding apenas nos cinco alvos.
+        # O tamanho final depende dos dados e nao e garantido.
+        (dados.write.mode("overwrite")
+            .option("compression", CODEC)
+            .option("parquet.enable.dictionary", DICIONARIO)
+            .parquet(caminho))
+
+        arquivos = arquivos_parquet_recursivo(caminho)
+        tamanho = sum(a.size for a in arquivos)
+        real = TAMANHO_REAL_BYTES[nome]
+        diferenca = (tamanho / real - 1) * 100
         print(
-            f'GERANDO {nome}: '
-            f'{qtd_syn[nome]:,} sinteticos'
+            f'[GRAVADO] {nome} | arquivos={len(arquivos):,} '
+            f'(referencia={ARQUIVOS_REFERENCIA[nome]:,}) | '
+            f'tamanho={tamanho / 10**9:.3f} GB | '
+            f'diferenca tamanho={diferenca:+.1f}%'
         )
-
-        if qtd_syn[nome] == 0:
-
-            dados = originais[nome]
-
-        else:
-
-            dados = originais[nome].unionByName(
-                sinteticos(nome)
-            )
-
-        # ----------------------------------------------------
-        # PARTICIONAMENTO OPCIONAL NA GRAVACAO
-        # ----------------------------------------------------
-
-        if PARTICIONAMENTO:
-
-            particoes = calcular_particoes(
-                metas[nome]
-            )
-
-            dados = dados.repartition(
-                particoes
-            )
-
+        if len(arquivos) != ARQUIVOS_REFERENCIA[nome] and not MODO_AMOSTRA:
+            print('[AVISO] Quantidade fisica de arquivos difere da referencia.')
+        if nome in DIAS_REFERENCIA:
             print(
-                f'PARTICIONAMENTO | {nome} | '
-                f'{particoes} particoes'
+                '[REFERENCIA DE DIAS]', DIAS_REFERENCIA[nome],
+                '| verificar valores distintos da coluna no validador'
             )
 
-        else:
-
-            print(
-                f'SEM REPARTITION EXPLICITO | {nome}'
-            )
-
-        # ----------------------------------------------------
-        # GRAVACAO PARQUET
-        # ----------------------------------------------------
-
-        dados.write.mode(
-            'overwrite'
-        ).parquet(
-            f'{DESTINO}/{nome}'
-        )
-
-        print(
-            'OK',
-            nome
-        )
-
-    print()
-    print('=' * 65)
-    print('PROCESSAMENTO FINALIZADO')
-    print('=' * 65)
-
-    print('DESTINO:', DESTINO)
-
-    print(
-        'PARTICIONAMENTO:',
-        'ATIVADO' if PARTICIONAMENTO else 'DESATIVADO'
-    )
-
-    print(
-        'TOTAL DE REGISTROS PLANEJADOS:',
-        f'{sum(metas.values()):,}'
-    )
-
+    print('\nPROCESSAMENTO FINALIZADO | DESTINO:', DESTINO)
+    print('TOTAL DE REGISTROS PLANEJADOS:', f'{sum(metas.values()):,}')
 else:
+    print('\n' + '=' * 112)
+    print('PLANEJAMENTO DE GRAVACAO V13 | NENHUM ARQUIVO SERA CRIADO OU ALTERADO')
+    print('=' * 112)
 
-    print(
-        'MODO PLANEJAMENTO: nada gravado'
-    )
+    # Mede os arquivos existentes, quando disponiveis. A medicao e real;
+    # a previsao de uma NOVA gravacao e apenas uma referencia aproximada.
+    # O conteudo, a cardinalidade e o codec podem alterar drasticamente os bytes.
+    def medir_parquets_existentes(path):
+        try:
+            arquivos = arquivos_parquet_recursivo(path)
+            return len(arquivos), sum(a.size for a in arquivos)
+        except Exception:
+            return None, None
+
+    def tamanho_legivel(valor):
+        if valor is None:
+            return 'N/D'
+        if valor >= 1e9:
+            return f'{valor / 1e9:,.2f} GB'
+        if valor >= 1e6:
+            return f'{valor / 1e6:,.2f} MB'
+        return f'{valor / 1e3:,.2f} KB'
+
+    linhas_total = 0
+    bytes_ref_total = 0
+    bytes_existentes_total = 0
+    encontrados = 0
+    previsao = []
+
+    for nome in ALVOS:
+        linhas = metas[nome]
+        arquivos_meta = ARQUIVOS_REFERENCIA[nome]
+        bytes_ref = TAMANHO_REAL_BYTES[nome]
+        caminho_existente = f'{DESTINO.rstrip("/")}/{nome}'
+        arq_existentes, bytes_existentes = medir_parquets_existentes(caminho_existente)
+        # Se a saida ja existe, seu tamanho e uma observacao objetiva,
+        # NAO uma estimativa confiavel da nova geracao.
+        # Se nao existe, usa a ultima medida V10 apenas como referencia historica.
+        base_bytes = bytes_existentes if bytes_existentes is not None else TAMANHOS_BASE_BYTES.get(nome)
+        fonte = 'MEDIDO NO DESTINO' if bytes_existentes is not None else 'HISTORICO V10'
+        if bytes_existentes is not None:
+            encontrados += 1
+            bytes_existentes_total += bytes_existentes
+        linhas_total += linhas
+        bytes_ref_total += bytes_ref
+        previsao.append((nome, linhas, arquivos_meta, bytes_ref, base_bytes, fonte))
+
+    print(f'{"DATASET":35} {"LINHAS":>14} {"ARQUIVOS":>8} {"META REAL":>13} {"BASE OBSERVADA":>16}  FONTE')
+    print('-' * 112)
+    for nome, linhas, arqs, ref, base, fonte in previsao:
+        print(f'{nome:35} {linhas:>14,} {arqs:>8,} {tamanho_legivel(ref):>13} {tamanho_legivel(base):>16}  {fonte}')
+    print('-' * 112)
+    print(f'TOTAL DE LINHAS PREVISTAS: {linhas_total:,}')
+    print(f'TOTAL DE ARQUIVOS-ALVO: {sum(ARQUIVOS_REFERENCIA[n] for n in ALVOS):,}')
+    print(f'TAMANHO TOTAL DE REFERENCIA REAL: {tamanho_legivel(bytes_ref_total)}')
+    print(f'DATASETS COM TAMANHO MEDIDO NO DESTINO: {encontrados}/{len(ALVOS)}')
+    print(f'SOMA DOS TAMANHOS MEDIDOS NO DESTINO: {tamanho_legivel(bytes_existentes_total)}')
+    print('\nAVISO: BASE OBSERVADA NAO E PREVISAO CALIBRADA DA PROXIMA GRAVACAO.')
+    print('Cinco datasets usarao SNAPPY e dictionary=false.')
+    print('Os demais usarao SNAPPY e dictionary=true.')
+    print('Tamanhos finais NAO sao previsiveis com precisao sem gravacao.')
+    print('MODO PLANEJAMENTO: EXECUTAR_GRAVACAO=False; nenhum dado gravado.')
 
 
 # COMMAND ----------
 
-# =====================================================
-# VALIDACAO DE VOLUMETRIA E SCHEMA - V4
-# =====================================================
+# ============================================================
+# VALIDADOR V6 - VOLUMETRIA FISICA DOS DATASETS
+# ============================================================
 
-# ORIGEM, DESTINO, MODO_AMOSTRA, LIMITE_AMOSTRA
-# e ALVOS devem estar definidos na celula anterior.
+# Referencia: imagem dos dados reais
+# Formato: (linhas, arquivos, tamanho, unidade)
 
-BASES = list(ALVOS.keys())
+REFERENCIA = {
+    "selling_prices2_current": (901802225, 3044, 19.7, "GB"),
+    "base_prices_current": (776858317, 741, 14.1, "GB"),
+    "prices": (164465199, 79, 6.1, "GB"),
+    "prices_penultimate_execution": (164465199, 79, 6.1, "GB"),
+    "robinhood_campaign_products": (73199718, 867, 744.5, "MB"),
+    "campaigns_v2": (35210395, 393, 1.3, "GB"),
+    "visao_catalogo_produto_atual": (32201680, 564, 8.8, "GB"),
+    "prices_historic": (2391182, 11, 65.9, "MB"),
+    "robinhood_campaigns": (1429841, 1730, 96.0, "MB"),
+    "discounts_v2": (572498, 937, 85.6, "MB"),
+    "products_discounts": (91253, 4, 0.6, "MB"),
+    "payment_methods": (36, 2, 9.6, "KB")
+}
 
-aprovados = 0
-falhas = []
+TOLERANCIA_TAMANHO_PCT = 5.0
 
-for nome in BASES:
+def tamanho_bytes(valor, unidade):
+    fatores = {
+        "GB": 1000**3,
+        "MB": 1000**2,
+        "KB": 1000
+    }
+    return valor * fatores[unidade]
 
-    original = spark.read.parquet(f"{ORIGEM}/{nome}")
-    gerado = spark.read.parquet(f"{DESTINO}/{nome}")
 
-    qtd_original = original.count()
-    qtd_gerado = gerado.count()
+def listar_parquets(caminho):
+    arquivos = []
+    pilha = [caminho]
 
-    schema_ok = original.schema == gerado.schema
+    while pilha:
+        atual = pilha.pop()
 
-    if MODO_AMOSTRA:
-        esperado = min(LIMITE_AMOSTRA, ALVOS[nome])
-    else:
-        esperado = ALVOS[nome]
+        for item in dbutils.fs.ls(atual):
+            if item.isDir():
+                pilha.append(item.path)
+            elif item.path.lower().endswith(".parquet"):
+                arquivos.append(item)
 
-    quantidade_ok = qtd_gerado == esperado
+    return arquivos
 
-    status = "OK" if schema_ok and quantidade_ok else "FALHA"
 
-    if status == "OK":
-        aprovados += 1
-    else:
-        falhas.append(nome)
+def formatar_tamanho(bytes_total):
+    if bytes_total >= 1000**3:
+        return f"{bytes_total / 1000**3:.2f} GB"
+    if bytes_total >= 1000**2:
+        return f"{bytes_total / 1000**2:.2f} MB"
+    return f"{bytes_total / 1000:.2f} KB"
 
-    print(
-        f"[{status:5}] {nome:35} "
-        f"original={qtd_original:>12,} "
-        f"gerado={qtd_gerado:>12,} "
-        f"esperado={esperado:>12,} "
-        f"schema={'OK' if schema_ok else 'DIVERGENTE'}"
-    )
 
-print("\n========== RESUMO ==========")
-print(f"Datasets aprovados: {aprovados}/{len(BASES)}")
-print(f"Datasets com falha: {len(falhas)}")
-
-if falhas:
-    print("Falhas:", ", ".join(falhas))
-else:
-    print("VALIDACAO DE VOLUMETRIA E SCHEMA APROVADA")
-
-# COMMAND ----------
-
-# VALIDADOR V4.1 — Databricks Serverless / Spark Connect — SOMENTE LEITURA
-# Compara problemas no DESTINO contra a ORIGEM usando diferenca multiconjunto (exceptAll).
-# HERDADA = ocorrencia ja presente na origem; FALHA = ocorrencia nova no destino.
-from pyspark.sql import functions as F
-
-LIMITE_AMOSTRA = "{LIMITE_AMOSTRA}"
-MOSTRAR_EXEMPLOS = 5
-BASES = [
-    'base_prices_current', 'products_discounts', 'selling_prices2_current',
-    'discounts_v2', 'robinhood_campaigns', 'robinhood_campaign_products',
-    'campaigns_v2', 'payment_methods', 'visao_catalogo_produto_atual',
-    'prices', 'prices_historic', 'prices_penultimate_execution'
-]
-
-orig = {b: spark.read.parquet(f"{ORIGEM}/{b}") for b in BASES}
-dest = {b: spark.read.parquet(f"{DESTINO}/{b}") for b in BASES}
 resultados = []
 
-def registrar(tipo, teste, herdadas=0, novas=0, detalhe='', status=None):
-    status = status or ('FALHA' if novas else 'HERDADA' if herdadas else 'OK')
-    resultados.append((tipo, teste, status, int(herdadas), int(novas), detalhe))
-    print(f'[{status:13}] {tipo:12} {teste:58} herdadas={herdadas:,} novas={novas:,} {detalhe}')
+for nome, (linhas_ref, arquivos_ref, valor_ref, unidade) in REFERENCIA.items():
 
-def chaves(df, cols):
-    return df.select(*[F.col(c).alias(f'__k{i}') for i, c in enumerate(cols)])
+    print(f"[VALIDANDO] {nome}")
 
-def verificar_relacao(filho, pai, cols_f, cols_p=None):
-    cols_p = cols_p or cols_f
-    nome = f'{filho} -> {pai}'
-    ausentes = ([f'filho.{c}' for c in cols_f if c not in dest[filho].columns] +
-                [f'pai.{c}' for c in cols_p if c not in dest[pai].columns])
-    if ausentes:
-        registrar('REFERENCIA', nome, detalhe=f'colunas ausentes: {ausentes}', status='NAO_APLICAVEL')
-        return
-    keys = [f'__k{i}' for i in range(len(cols_f))]
-    def problemas(fonte):
-        f = chaves(fonte[filho], cols_f)
-        p = chaves(fonte[pai], cols_p).dropna(subset=keys).distinct()
-        nulos = f.filter(' OR '.join(f'`{k}` IS NULL' for k in keys))
-        orfaos = f.dropna(subset=keys).join(p, keys, 'left_anti')
-        return nulos, orfaos
-    (n0, o0), (n1, o1) = problemas(orig), problemas(dest)
-    for tipo, antigo, atual in [('CHAVE_NULA', n0, n1), ('REFERENCIA', o0, o1)]:
-        # Subtracao de multiconjuntos, nao apenas distinct: preserva multiplicidades.
-        novas_df = atual.exceptAll(antigo)
-        qtd_novas = novas_df.count()
-        qtd_atual = atual.count()
-        qtd_herdadas = qtd_atual - qtd_novas
-        registrar(tipo, nome, qtd_herdadas, qtd_novas, f'total_destino={qtd_atual:,}')
-        if qtd_novas and MOSTRAR_EXEMPLOS:
-            print('  Exemplos de ocorrencias novas:')
-            novas_df.show(MOSTRAR_EXEMPLOS, truncate=False)
+    try:
+        caminho = f"{DESTINO.rstrip('/')}/{nome}"
 
-def verificar_unicidade(base, coluna):
-    nome = f'{base}: {coluna}'
-    if coluna not in dest[base].columns:
-        registrar('UNICIDADE', nome, status='NAO_APLICAVEL', detalhe='coluna ausente')
-        return
-    def repetidas(df):
-        return df.groupBy(coluna).count().filter(F.col('count') > 1).select(coluna)
-    antes = repetidas(orig[base])
-    depois = repetidas(dest[base])
-    novas = depois.join(antes, [coluna], 'left_anti')
-    qtd_novas = novas.count()
-    qtd_herdadas = depois.count() - qtd_novas
-    registrar('UNICIDADE', nome, qtd_herdadas, qtd_novas,
-              'conta chaves repetidas; repeticoes adicionais em chave herdada exigem exame separado')
-    if qtd_novas and MOSTRAR_EXEMPLOS:
-        novas.show(MOSTRAR_EXEMPLOS, truncate=False)
-    # Testa se a quantidade de ocorrencias de uma chave cresceu alem das originais.
-    c0 = orig[base].groupBy(coluna).count().withColumnRenamed('count', 'antes')
-    c1 = dest[base].groupBy(coluna).count().withColumnRenamed('count', 'depois')
-    cresceu = (c1.join(c0, [coluna], 'left')
-                 .filter((F.col('antes') > 1) & (F.col('depois') > F.col('antes'))))
-    qtd_cresceu = cresceu.count()
-    registrar('UNICIDADE', f'{nome} (repeticoes ampliadas)', 0, qtd_cresceu,
-              'chaves ja duplicadas na origem com mais ocorrencias no destino')
+        # Quantidade real de registros
+        df = spark.read.parquet(caminho)
+        linhas_geradas = df.count()
 
-print('\n========== 1. CONTAGEM E SCHEMA ==========')
-for b in BASES:
-    n0, n1 = orig[b].count(), dest[b].count()
-    esperado = ALVOS[b]
-    registrar('CONTAGEM', b, 0, int(n1 != esperado), f'original={n0:,} destino={n1:,} esperado={esperado:,}')
-    registrar('SCHEMA', b, 0, int(orig[b].schema != dest[b].schema))
+        # Arquivos fisicos
+        arquivos = listar_parquets(caminho)
+        arquivos_gerados = len(arquivos)
 
-print('\n========== 2. REFERENCIAS DE PRODUTO ==========')
-for f in ['selling_prices2_current', 'prices', 'prices_penultimate_execution',
-          'prices_historic', 'visao_catalogo_produto_atual']:
-    verificar_relacao(f, 'base_prices_current', ['seller_id', 'sku'])
+        # Tamanho fisico dos Parquets
+        bytes_gerados = sum(a.size for a in arquivos)
+        bytes_referencia = tamanho_bytes(valor_ref, unidade)
 
-print('\n========== 3. CAMPANHAS E DESCONTOS ==========')
-verificar_relacao('products_discounts', 'discounts_v2', ['campaign_id'], ['id'])
-verificar_relacao('robinhood_campaign_products', 'robinhood_campaigns', ['campaign_id'])
-verificar_relacao('robinhood_campaign_products', 'visao_catalogo_produto_atual', ['seller_id', 'sku'])
-verificar_relacao('products_discounts', 'visao_catalogo_produto_atual', ['seller_id', 'sku'])
+        # Diferencas
+        diferenca_linhas = linhas_geradas - linhas_ref
+        diferenca_arquivos = arquivos_gerados - arquivos_ref
 
-print('\n========== 4. UNICIDADE ==========')
-verificar_unicidade('discounts_v2', 'id')
-verificar_unicidade('robinhood_campaigns', 'campaign_id')
+        diferenca_tamanho_pct = (
+            (bytes_gerados - bytes_referencia)
+            / bytes_referencia * 100
+        )
 
-print('\n========== 5. RESUMO ==========')
-resumo = spark.createDataFrame(resultados, 'categoria string, teste string, status string, herdadas long, novas long, detalhe string')
-resumo.groupBy('status').count().orderBy('status').show(truncate=False)
-print('TESTES COM FALHA:', sum(1 for r in resultados if r[2] == 'FALHA'))
-resumo.filter(F.col('status') == 'FALHA').show(100, truncate=False)
-print('OBS: referencias e unicidade sao hipoteses do modelo; validar com regras de negocio.')
-print('OBS: exceptAll compara ocorrencias de chaves; nao certifica regras monetarias ou estruturas aninhadas.')
+        # Status individuais
+        # Em modo amostra, respeita a meta da celula anterior
+        esperado_linhas = (
+            min(LIMITE_AMOSTRA, ALVOS[nome])
+            if MODO_AMOSTRA
+            else linhas_ref
+        )
 
+        linhas_ok = linhas_geradas == esperado_linhas
+
+        arquivos_ok = (
+            True if MODO_AMOSTRA
+            else arquivos_gerados == arquivos_ref
+        )
+
+        tamanho_ok = (
+            True if MODO_AMOSTRA
+            else abs(diferenca_tamanho_pct) <= TOLERANCIA_TAMANHO_PCT
+        )
+
+        status = (
+            "OK"
+            if linhas_ok and arquivos_ok and tamanho_ok
+            else "FALHA"
+        )
+
+        resultados.append({
+            "Dataset": nome,
+            "Status": status,
+            "Linhas esperadas": esperado_linhas,
+            "Linhas geradas": linhas_geradas,
+            "Linhas OK": linhas_ok,
+            "Arquivos reais": arquivos_ref,
+            "Arquivos gerados": arquivos_gerados,
+            "Arquivos OK": arquivos_ok,
+            "Tamanho real": f"{valor_ref} {unidade}",
+            "Tamanho gerado": formatar_tamanho(bytes_gerados),
+            "Diferença tamanho %": round(diferenca_tamanho_pct, 2),
+            "Tamanho OK": tamanho_ok
+        })
+
+    except Exception as erro:
+        resultados.append({
+            "Dataset": nome,
+            "Status": "ERRO",
+            "Erro": str(erro)
+        })
+        print(f"[ERRO] {nome}: {erro}")
+
+
+# ============================================================
+# RESULTADO FINAL
+# ============================================================
+
+from pyspark.sql import types as T
+
+schema_resultado = T.StructType([
+    T.StructField("Dataset", T.StringType()),
+    T.StructField("Status", T.StringType()),
+    T.StructField("Linhas esperadas", T.LongType()),
+    T.StructField("Linhas geradas", T.LongType()),
+    T.StructField("Linhas OK", T.BooleanType()),
+    T.StructField("Arquivos reais", T.IntegerType()),
+    T.StructField("Arquivos gerados", T.IntegerType()),
+    T.StructField("Arquivos OK", T.BooleanType()),
+    T.StructField("Tamanho real", T.StringType()),
+    T.StructField("Tamanho gerado", T.StringType()),
+    T.StructField("Diferença tamanho %", T.DoubleType()),
+    T.StructField("Tamanho OK", T.BooleanType()),
+    T.StructField("Erro", T.StringType())
+])
+
+# Normaliza os resultados para exibição
+dados_resultado = [
+    {campo.name: r.get(campo.name) for campo in schema_resultado}
+    for r in resultados
+]
+
+df_resultado = spark.createDataFrame(
+    dados_resultado,
+    schema=schema_resultado
+)
+
+display(df_resultado)
+
+aprovados = sum(r["Status"] == "OK" for r in resultados)
+falhas = len(resultados) - aprovados
+
+print("\n" + "=" * 65)
+print("RESUMO DA VALIDACAO V6")
+print("=" * 65)
+print(f"Datasets avaliados: {len(resultados)}")
+print(f"Aprovados: {aprovados}")
+print(f"Falhas: {falhas}")
+print("=" * 65)
 
 # COMMAND ----------
 
-from pyspark.sql import functions as F
+# INVENTARIO DE DATASETS - VISAO UNICA DE PRECOS
+# ============================================================
 
-ROOT = "/Volumes/workspace/default/dados_teste_visao_unica"
+import os
+from datetime import datetime
+from pyspark.sql import Row
+
+# ============================================================
+# 1. CONFIGURACOES
+# ============================================================
+
+BASE = "/Volumes/test/default/dados_origin_visao_unica"
+
+DIRETORIOS = {
+    "DADOS SINTÉTICOS": f"{BASE}/parquet_volumetria_final",
+    "RESULTADOS": f"{BASE}/resultados"
+}
+
+# ============================================================
+# 2. FUNCOES AUXILIARES
+# ============================================================
+
+def formatar_numero(valor):
+    return f"{valor:,}".replace(",", ".")
 
 
-def carregar(base, origem):
-    return spark.read.parquet(f"{origem}/{base}")
+def formatar_tamanho(bytes_total):
 
-def verificar_orfaos(base_filha, base_pai, chaves_filha, chaves_pai, origem):
-    filho = carregar(base_filha, origem)
-    pai = carregar(base_pai, origem)
+    if bytes_total >= 1024 ** 3:
+        return f"{bytes_total / (1024 ** 3):,.1f} GB".replace(",", "X").replace(".", ",").replace("X", ".")
 
-    f = filho.select(
-        *[F.col(c).alias(f"k{i}") for i, c in enumerate(chaves_filha)]
-    )
+    if bytes_total >= 1024 ** 2:
+        return f"{bytes_total / (1024 ** 2):,.1f} MB".replace(",", "X").replace(".", ",").replace("X", ".")
 
-    p = pai.select(
-        *[F.col(c).alias(f"k{i}") for i, c in enumerate(chaves_pai)]
-    ).distinct()
+    return f"{bytes_total / 1024:,.1f} KB".replace(",", "X").replace(".", ",").replace("X", ".")
 
-    return f.join(p, [f"k{i}" for i in range(len(chaves_filha))], "left_anti").count()
 
-relacoes = [
-    ("robinhood_campaign_products", "robinhood_campaigns",
-     ["campaign_id"], ["campaign_id"]),
+def listar_arquivos(caminho):
 
-    ("robinhood_campaign_products", "visao_catalogo_produto_atual",
-     ["seller_id", "sku"], ["seller_id", "sku"])
-]
+    arquivos = []
 
-print("========== ORIGINAIS X GERADOS ==========")
+    for raiz, diretorios, nomes in os.walk(caminho):
 
-for filho, pai, chaves_filho, chaves_pai in relacoes:
-    print(f"\n{filho} -> {pai}")
+        for nome in nomes:
 
-    for nome, caminho in [
-        ("ORIGINAL", ORIGEM),
-        ("GERADO", DESTINO)
-    ]:
-        qtd = verificar_orfaos(
-            filho, pai, chaves_filho, chaves_pai, caminho
+            if nome.lower().endswith(".parquet"):
+
+                arquivo = os.path.join(raiz, nome)
+
+                arquivos.append(arquivo)
+
+    return arquivos
+
+
+def identificar_particoes(caminho):
+
+    particoes = set()
+
+    for raiz, diretorios, arquivos in os.walk(caminho):
+
+        relativo = os.path.relpath(raiz, caminho)
+
+        if relativo == ".":
+            continue
+
+        partes = relativo.split(os.sep)
+
+        for parte in partes:
+
+            if "=" in parte:
+                particoes.add(parte)
+
+    if not particoes:
+        return "nenhuma"
+
+    return f"{len(particoes)} partições"
+
+
+# ============================================================
+# 3. INVENTARIO POR DIRETORIO
+# ============================================================
+
+for tipo, diretorio in DIRETORIOS.items():
+
+    print()
+    print("=" * 100)
+    print(f" DATASETS - {tipo}")
+    print("=" * 100)
+
+    if not os.path.isdir(diretorio):
+
+        print(f"[AVISO] Diretório não encontrado: {diretorio}")
+        continue
+
+    registros = []
+
+    datasets = sorted(os.listdir(diretorio))
+
+    for dataset in datasets:
+
+        caminho = os.path.join(diretorio, dataset)
+
+        if not os.path.isdir(caminho):
+            continue
+
+        try:
+
+            # Quantidade real de registros
+            linhas = spark.read.parquet(caminho).count()
+
+            # Arquivos Parquet
+            arquivos = listar_arquivos(caminho)
+
+            quantidade_arquivos = len(arquivos)
+
+            # Tamanho físico
+            tamanho_bytes = sum(
+                os.path.getsize(arquivo)
+                for arquivo in arquivos
+            )
+
+            # Partições
+            particoes = identificar_particoes(caminho)
+
+            registros.append({
+                "Dataset": dataset,
+                "Linhas": formatar_numero(linhas),
+                "Arquivos": formatar_numero(quantidade_arquivos),
+                "Tamanho": formatar_tamanho(tamanho_bytes),
+                "Partições": particoes,
+                "Mudança última revisão": "Não avaliado",
+                "_ordem": linhas
+            })
+
+            print(f"[OK] {dataset}", flush=True)
+
+        except Exception as erro:
+
+            print(f"[ERRO] {dataset}: {str(erro)[:180]}")
+
+    # ========================================================
+    # 4. EXIBIR TABELA
+    # ========================================================
+
+    if registros:
+
+        registros = sorted(
+            registros,
+            key=lambda x: x["_ordem"],
+            reverse=True
         )
 
-        print(f"{nome:10} órfãos={qtd}")
+        for item in registros:
+            del item["_ordem"]
 
-print("\n========== DUPLICIDADES ==========")
-
-for base, chave in [
-    ("discounts_v2", "id"),
-    ("robinhood_campaigns", "campaign_id")
-]:
-    print(f"\n{base} / {chave}")
-
-    for nome, caminho in [
-        ("ORIGINAL", ORIGEM),
-        ("GERADO", DESTINO)
-    ]:
-        df = carregar(base, caminho)
-
-        duplicados = (
-            df.groupBy(chave)
-              .count()
-              .filter(F.col("count") > 1)
-              .count()
+        display(
+            spark.createDataFrame(registros)
+            .select(
+                "Dataset",
+                "Linhas",
+                "Arquivos",
+                "Tamanho",
+                "Partições",
+                "Mudança última revisão"
+            )
         )
 
-        print(f"{nome:10} chaves duplicadas={duplicados}")
+    else:
+        print("Nenhum dataset encontrado.")

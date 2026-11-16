@@ -6,7 +6,7 @@
 import os
 # Caminho do Volume no Databricks
 CAMINHO_VOLUME = (
-    "/Volumes/demo-catalog/visao_unica_precos/"
+    "/Volumes/test/default/"
     "dados_origin_visao_unica"
 )
 
@@ -14,10 +14,10 @@ CAMINHO_VOLUME = (
 ARQUIVO_ZIP = f"{CAMINHO_VOLUME}/Bases_Visao_unica.zip"
 
 # Caminho do arquivo PARQUET
-DESTINO_PARQUET = '/Volumes/demo-catalog/visao_unica_precos/dados_origin_visao_unica/parquet'
+DESTINO_PARQUET = '/Volumes/test/default/dados_origin_visao_unica/parquet'
 
 # Caminho do Relatório
-DESTINO_RELATORIO='/Volumes/demo-catalog/visao_unica_precos/dados_origin_visao_unica/relatorios_lote11_originais'
+DESTINO_RELATORIO='/Volumes/test/default/dados_origin_visao_unica/relatorios_lote11_originais'
 
 print("Volume:", CAMINHO_VOLUME)
 print("Arquivo ZIP:", ARQUIVO_ZIP)

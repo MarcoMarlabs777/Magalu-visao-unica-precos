@@ -25,30 +25,27 @@ logger = logging.getLogger()
 def config_spark() -> SnessSpark:
     """
     Inicializa o SnessSpark conforme o ambiente.
-    Databricks Serverless:
-        Utiliza a sessão Spark existente, sem configurar
-        extensões Delta manualmente.
-    Ambiente original:
-        Preserva a configuração Spark/Delta existente.
     """
     import os
 
-    if os.environ.get("SNESS_DATABRICKS_SERVERLESS") == "true":
-        return SnessSpark()
+    if os.environ.get("SNESS_DATABRICKS", "").lower() == "true":
+        # Databricks: Serverless, Classic ou Job Compute
+        ss = SnessSpark()
+    else:
+        # Configuração original Magalu
+        _ = (
+            SparkSession.builder.config(
+                "spark.sql.catalog.spark_catalog",
+                "org.apache.spark.sql.delta.catalog.DeltaCatalog",
+            )
+            .config(
+                "spark.sql.extensions",
+                "io.delta.sql.DeltaSparkSessionExtension"
+            )
+            .getOrCreate()
+        )
 
-    # Configuração original Magalu
-    """Configure spark with packages necessary to replaceWhere work."""
-    _ = (
-        SparkSession.builder.config(
-            "spark.sql.catalog.spark_catalog",
-            "org.apache.spark.sql.delta.catalog.DeltaCatalog",
-        )
-        .config(
-            "spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
-        )
-        .getOrCreate()
-    )
-    ss = SnessSpark()
+        ss = SnessSpark()
 
     return ss
 
